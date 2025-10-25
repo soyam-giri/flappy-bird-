@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Flappy Bird — Classic Fixed Spacing</title>
+<style>
+:root{
+  --canvas-w:350px;
+  --canvas-h:500px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(#78c7ff,#bfefff 70%);
+  font-family:Inter,system-ui,Arial,sans-serif;
+}
+.wrap{position:relative;width:var(--canvas-w);height:var(--canvas-h)}
+canvas{
+  display:block;
+  width:100%;height:100%;
+  border-radius:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.25);
+  background:linear-gradient(to top,#87ceeb,#b3ecff);
+}
+.overlay{
+  position:absolute;left:0;right:0;top:0;bottom:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  pointer-events:none;
+}
+.menu, .game-over{
+  pointer-events:auto;
+  background:rgba(0,0,0,0.6);
+  color:white;padding:18px;border-radius:10px;text-align:center;
+  min-width:220px;
+}
+.menu h1{font-size:22px;margin-bottom:6px}
+.menu p{font-size:14px;margin-bottom:10px;opacity:0.95}
+.btn{
+  display:inline-block;background:#ffd24d;color:#222;padding:8px 12px;border-radius:8px;
+  border:none;cursor:pointer;font-weight:600;box-shadow:0 6px 0 rgba(0,0,0,0.12);
+}
+.small{font-size:13px;padding:6px 10px;}
+.top-ui{
+  position:absolute;top:10px;left:10px;color:white;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,0.4);
+  font-size:14px;
+}
+#pauseBtn{
+  position:absolute;top:10px;right:10px;z-index:4;
+  pointer-events:auto;
+  background:#ffd24d;border:none;padding:8px 10px;border-radius:8px;font-weight:700;
+}
+#mobileFlap{position:absolute;bottom:18px;right:18px;z-index:4;
+  pointer-events:auto;background:rgba(255,255,255,0.85);border-radius:999px;padding:12px 16px;font-weight:700;border:0}
+@media (min-width:420px){
+  #mobileFlap{display:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+  <canvas id="gameCanvas" width="350" height="500"></canvas>
+
+  <button id="pauseBtn" class="btn small" aria-pressed="false">⏸ Pause</button>
+  <button id="mobileFlap" class="btn small">FLAP</button>
+
+  <div class="overlay" id="overlay">
+    <div class="menu" id="startMenu">
+      <h1>Flappy Bird — Classic</h1>
+      <p>Tap / Click or press <strong>Space</strong> to flap.<br>Tap to start the game.</p>
+      <div style="margin:8px 0">
+        <button id="startBtn" class="btn">Start</button>
+      </div>
+      <div style="font-size:13px;opacity:0.95">Best: <span id="bestTop">0</span></div>
+    </div>
+
+    <div class="game-over" id="gameOver" style="display:none;">
+      <h2>Game Over</h2>
+      <p>Your Score: <strong id="finalScore">0</strong></p>
+      <p>Best: <strong id="bestEnd">0</strong></p>
+      <div style="margin-top:8px">
+        <button id="restartBtn" class="btn">Restart</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="top-ui" id="hud" style="display:none">
+    Score: <span id="hudScore">0</span> &nbsp;&nbsp; Best: <span id="hudBest">0</span>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+let gameState = "menu";
+let bird, pipes, clouds;
+let score = 0;
+let best = localStorage.getItem("flappyBest") ? Number(localStorage.getItem("flappyBest")) : 0;
+let groundOffset = 0;
+
+const gravity = 0.2;
+const flapStrength = -4;
+const pipeGap = 150;
+const pipeWidth = 50;
+const pipeSpeed = 2.5;
+const groundHeight = 60;
+const pipeSpacing = 160; // fixed distance between pipes
+
+const overlay = document.getElementById("overlay");
+const startMenu = document.getElementById("startMenu");
+const gameOverMenu = document.getElementById("gameOver");
+const hud = document.getElementById("hud");
+const startBtn = document.getElementById("startBtn");
+const restartBtn = document.getElementById("restartBtn");
+const pauseBtn = document.getElementById("pauseBtn");
+const mobileFlap = document.getElementById("mobileFlap");
+
+document.getElementById("bestTop").textContent = best;
+document.getElementById("hudBest").textContent = best;
+
+function resetGame() {
+  bird = { x: 80, y: canvas.height / 2, r: 12, velY: 0, frame: 0, angle: 0 };
+  pipes = [];
+  clouds = [];
+  groundOffset = 0;
+  score = 0;
+
+  for (let i = 0; i < 3; i++) {
+    let gapY = Math.random() * (canvas.height - pipeGap - 150) + 50;
+    pipes.push({ x: 300 + i * pipeSpacing, y: gapY, passed: false });
+  }
+
+  for (let i = 0; i < 3; i++) {
+    clouds.push({ x: Math.random() * canvas.width, y: Math.random() * 100 });
+  }
+}
+
+function drawBird() {
+  ctx.save();
+  ctx.translate(bird.x, bird.y);
+  bird.angle = Math.min(Math.max(bird.velY * 2, -30), 60);
+  ctx.rotate((bird.angle * Math.PI) / 180);
+
+  bird.frame += 0.2;
+  const wingPos = Math.sin(bird.frame) * 3;
+
+  ctx.fillStyle = "#FFD700";
+  ctx.beginPath();
+  ctx.arc(0, 0, bird.r, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#FFB300";
+  ctx.beginPath();
+  ctx.ellipse(-5, wingPos, 6, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "white";
+  ctx.beginPath();
+  ctx.arc(4, -4, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "black";
+  ctx.beginPath();
+  ctx.arc(5, -4, 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawPipes() {
+  ctx.fillStyle = "#2ecc71";
+  pipes.forEach(pipe => {
+    ctx.fillRect(pipe.x, 0, pipeWidth, pipe.y);
+    ctx.fillRect(pipe.x, pipe.y + pipeGap, pipeWidth, canvas.height - pipe.y - pipeGap - groundHeight);
+  });
+}
+
+function drawClouds() {
+  ctx.fillStyle = "white";
+  clouds.forEach(c => {
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 15, 0, Math.PI * 2);
+    ctx.arc(c.x + 20, c.y + 5, 20, 0, Math.PI * 2);
+    ctx.arc(c.x + 40, c.y, 15, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawGround() {
+  const groundY = canvas.height - groundHeight;
+  groundOffset = (groundOffset + pipeSpeed) % 40;
+  ctx.fillStyle = "#D2691E";
+  for (let x = -groundOffset; x < canvas.width; x += 40) {
+    ctx.fillRect(x, groundY, 40, groundHeight);
+  }
+  ctx.fillStyle = "#228B22";
+  ctx.fillRect(0, groundY - 5, canvas.width, 5);
+}
+
+function update() {
+  if (gameState !== "play") return;
+
+  bird.velY += gravity;
+  bird.y += bird.velY;
+
+  pipes.forEach(pipe => {
+    pipe.x -= pipeSpeed;
+
+    // recycle pipes with proper spacing
+    if (pipe.x + pipeWidth < 0) {
+      const maxX = Math.max(...pipes.map(p => p.x));
+      pipe.x = maxX + pipeSpacing;
+      pipe.y = Math.random() * (canvas.height - pipeGap - 150) + 50;
+      pipe.passed = false;
+    }
+
+    if (!pipe.passed && bird.x > pipe.x + pipeWidth) {
+      score++;
+      pipe.passed = true;
+      if (score > best) {
+        best = score;
+        localStorage.setItem("flappyBest", best);
+      }
+    }
+
+    // Collision
+    if (
+      bird.x + bird.r > pipe.x &&
+      bird.x - bird.r < pipe.x + pipeWidth &&
+      (bird.y - bird.r < pipe.y || bird.y + bird.r > pipe.y + pipeGap)
+    ) {
+      endGame();
+    }
+  });
+
+  clouds.forEach(c => {
+    c.x -= 0.5;
+    if (c.x < -50) {
+      c.x = canvas.width + 50;
+      c.y = Math.random() * 100;
+    }
+  });
+
+  if (bird.y + bird.r > canvas.height - groundHeight) {
+    endGame();
+  }
+}
+
+function endGame() {
+  gameState = "over";
+  overlay.style.display = "flex";
+  startMenu.style.display = "none";
+  gameOverMenu.style.display = "block";
+  hud.style.display = "none";
+  document.getElementById("finalScore").textContent = score;
+  document.getElementById("bestEnd").textContent = best;
+  document.getElementById("bestTop").textContent = best;
+  document.getElementById("hudBest").textContent = best;
+}
+
+function flap() {
+  if (gameState === "play") {
+    bird.velY = flapStrength;
+  } else if (gameState === "menu") {
+    startGame();
+  }
+}
+
+function startGame() {
+  gameState = "play";
+  overlay.style.display = "none";
+  hud.style.display = "block";
+  resetGame();
+}
+
+function restartGame() {
+  resetGame();
+  gameOverMenu.style.display = "none";
+  overlay.style.display = "none";
+  hud.style.display = "block";
+  gameState = "play";
+}
+
+function togglePause() {
+  if (gameState === "play") {
+    gameState = "pause";
+    pauseBtn.textContent = "▶ Resume";
+  } else if (gameState === "pause") {
+    gameState = "play";
+    pauseBtn.textContent = "⏸ Pause";
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawClouds();
+  drawPipes();
+  drawGround();
+  drawBird();
+  if (gameState === "play") update();
+  document.getElementById("hudScore").textContent = score;
+  requestAnimationFrame(draw);
+}
+
+// Controls
+document.addEventListener("keydown", e => {
+  if (e.code === "Space") flap();
+  if (e.code === "KeyP") togglePause();
+});
+canvas.addEventListener("mousedown", flap);
+mobileFlap.addEventListener("click", flap);
+startBtn.addEventListener("click", startGame);
+restartBtn.addEventListener("click", restartGame);
+pauseBtn.addEventListener("click", togglePause);
+
+resetGame();
+draw();
+</script>
+</body>
+</html>
